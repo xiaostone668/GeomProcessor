@@ -12,6 +12,9 @@
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QDir>
+#include <QUuid>
+#include <QFile>
+#include <QCoreApplication>
 
 // OCC
 #include <Aspect_DisplayConnection.hxx>
@@ -411,13 +414,30 @@ void GeomProcessorWindow::onSendResultBack()
         return;
     }
 
-    // Write to temp file
-    QString tmpDir  = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-    QString tmpFile = QDir(tmpDir).filePath("geomproc_result.stp");
+    // 将结果保存到 GeomProcessor\example\returned\<GUID>.stp
+    // 可执行文件在 build/Release，向上两级即为 GeomProcessor 根目录
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString returnedDir = QDir::cleanPath(appDir + "/../../example/returned");
+    if (!QDir(returnedDir).exists()) {
+        returnedDir = QDir::cleanPath(appDir + "/../example/returned");
+    }
+    if (!QDir(returnedDir).exists()) {
+        returnedDir = QDir::cleanPath(appDir + "/example/returned");
+    }
+    // 确保目录存在
+    QDir().mkpath(returnedDir);
+
+    QString guid    = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QString tmpFile = QDir(returnedDir).filePath(guid + ".stp");
 
     if (!m_processor->saveSTEP(tmpFile)) {
-        QMessageBox::warning(this, "错误", "保存临时 STEP 文件失败: " + m_processor->getLastError());
-        return;
+        // 回退到系统临时目录
+        QString tmpDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+        tmpFile = QDir(tmpDir).filePath("geomproc_result_" + guid + ".stp");
+        if (!m_processor->saveSTEP(tmpFile)) {
+            QMessageBox::warning(this, "错误", "保存临时 STEP 文件失败: " + m_processor->getLastError());
+            return;
+        }
     }
 
     if (m_receiver->sendResult(tmpFile)) {
