@@ -100,6 +100,10 @@ private:
     QLabel*          m_statusLabel  = nullptr;
     QProgressBar*    m_progressBar  = nullptr;
     QLabel*          m_ipcLabel     = nullptr;
+
+    // 3D 视图左下角几何信息悬浮标签
+    QLabel*          m_geomInfoLabel = nullptr;
+    void updateGeomInfoLabel(const QString& text);
 };
 
 #endif // GEOM_PROCESSOR_WINDOW_H

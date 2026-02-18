@@ -66,6 +66,30 @@ GeomProcessorWindow::~GeomProcessorWindow()
 void GeomProcessorWindow::resizeEvent(QResizeEvent* event)
 {
     QMainWindow::resizeEvent(event);
+    // 重新定位几何信息标签到左下角
+    if (m_geomInfoLabel && m_geomInfoLabel->isVisible()) {
+        QWidget* cw = centralWidget();
+        if (!cw) return;
+        const int margin = 10;
+        QPoint pos = cw->mapTo(this,
+            QPoint(margin, cw->height() - m_geomInfoLabel->height() - margin));
+        m_geomInfoLabel->move(pos);
+    }
+}
+
+void GeomProcessorWindow::updateGeomInfoLabel(const QString& text)
+{
+    if (!m_geomInfoLabel) return;
+    m_geomInfoLabel->setText(text);
+    m_geomInfoLabel->adjustSize();
+    QWidget* cw = centralWidget();
+    if (!cw) return;
+    const int margin = 10;
+    QPoint pos = cw->mapTo(this,
+        QPoint(margin, cw->height() - m_geomInfoLabel->height() - margin));
+    m_geomInfoLabel->move(pos);
+    m_geomInfoLabel->raise();
+    m_geomInfoLabel->show();
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +108,15 @@ void GeomProcessorWindow::setupUI()
     setupOperationPanel();
     setupFaceList();
     setupStatusBar();
+
+    // 几何信息悬浮标签（浮在 3D 视图左下角，父对象为主窗口）
+    m_geomInfoLabel = new QLabel(this);
+    m_geomInfoLabel->setStyleSheet(
+        "QLabel { background-color: rgba(0,0,0,160); color: #e0e0e0; "
+        "padding: 6px 10px; border-radius: 4px; "
+        "font-family: Consolas, monospace; font-size: 11px; }");
+    m_geomInfoLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_geomInfoLabel->hide();
 }
 
 void GeomProcessorWindow::setupMenuBar()
@@ -429,8 +462,11 @@ void GeomProcessorWindow::displayCurrentShape()
 
 void GeomProcessorWindow::updateStatusInfo()
 {
+    int nFaces   = m_processor->numFaces();
+    int nSolids  = m_processor->numSolids();
     m_statusLabel->setText(
-        QString("几何就绪 | %1 个面 | %2 个实体")
-        .arg(m_processor->numFaces())
-        .arg(m_processor->numSolids()));
+        QString("几何就绪 | %1 个面 | %2 个实体").arg(nFaces).arg(nSolids));
+    // 更新左下角悬浮信息
+    updateGeomInfoLabel(
+        QString("面: %1   实体: %2").arg(nFaces).arg(nSolids));
 }
