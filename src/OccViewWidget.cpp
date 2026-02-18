@@ -1,6 +1,7 @@
 #include "OccViewWidget.h"
 
 #include <QApplication>
+#include <QTimer>
 
 // OpenCASCADE includes
 #include <Aspect_DisplayConnection.hxx>
@@ -68,10 +69,30 @@ void OccViewWidget::attachWindow()
 // Qt events
 // ---------------------------------------------------------------------------
 
+void OccViewWidget::showEvent(QShowEvent* event)
+{
+    QWidget::showEvent(event);
+    if (!m_view.IsNull() && !m_windowAttached) {
+        // 延迟一个事件循环周期，确保 HWND 已分配
+        QTimer::singleShot(0, this, [this]() {
+            if (!m_windowAttached) {
+                attachWindow();
+            }
+            if (!m_view.IsNull() && m_windowAttached) {
+                m_view->MustBeResized();
+                m_view->Redraw();
+            }
+        });
+    }
+}
+
 void OccViewWidget::paintEvent(QPaintEvent* /*event*/)
 {
     if (m_view.IsNull()) return;
-    if (!m_windowAttached) attachWindow();
+    if (!m_windowAttached) {
+        attachWindow();
+        if (m_windowAttached) m_view->MustBeResized();
+    }
     m_view->Redraw();
 }
 

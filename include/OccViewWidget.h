@@ -6,6 +6,7 @@
 #include <QWheelEvent>
 #include <QPaintEvent>
 #include <QResizeEvent>
+#include <QShowEvent>
 
 // OpenCASCADE includes
 #include <AIS_InteractiveContext.hxx>
@@ -41,6 +42,7 @@ public:
     QPaintEngine* paintEngine() const override { return nullptr; }
 
 protected:
+    void showEvent(QShowEvent* event)         override;
     void paintEvent(QPaintEvent* event)       override;
     void resizeEvent(QResizeEvent* event)     override;
     void mousePressEvent(QMouseEvent* event)  override;
