@@ -44,7 +44,16 @@ bool GeomReceiver::attach()
     if (m_shm->isAttached()) return true;
 
     // First try to attach (if SimulationTool created it)
-    if (m_shm->attach(QSharedMemory::ReadWrite)) return true;
+    if (m_shm->attach(QSharedMemory::ReadWrite)) {
+        // Reset any leftover command so GeomProcessor always starts empty
+        m_shm->lock();
+        GeomIPCBlock blk;
+        memcpy(&blk, m_shm->constData(), sizeof(blk));
+        blk.cmd = CMD_IDLE;
+        memcpy(m_shm->data(), &blk, sizeof(blk));
+        m_shm->unlock();
+        return true;
+    }
 
     // If not available, create our own (so SimulationTool can attach later)
     if (m_shm->create(GEOM_IPC_SIZE, QSharedMemory::ReadWrite)) {
