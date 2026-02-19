@@ -157,9 +157,22 @@ bool GeomProcessor::deleteFaces(const std::vector<int>& faceIndices)
 
         emit progressUpdated(20);
 
+        // First, try to heal the shape before deletion
+        Handle(ShapeFix_Shape) fixer = new ShapeFix_Shape(m_shape);
+        fixer->SetPrecision(1e-4);
+        fixer->SetMinTolerance(1e-5);
+        fixer->SetMaxTolerance(1e-3);
+        fixer->Perform();
+        TopoDS_Shape healedShape = fixer->Shape();
+        
+        if (healedShape.IsNull()) {
+            setError("形状修复失败，无法删除面");
+            return false;
+        }
+
         // Use BRepAlgoAPI_Defeaturing to remove faces
         BRepAlgoAPI_Defeaturing def;
-        def.SetShape(m_shape);
+        def.SetShape(healedShape);
         def.AddFacesToRemove(facesToRemove);
         def.SetRunParallel(Standard_False);
         def.Build();
@@ -167,8 +180,39 @@ bool GeomProcessor::deleteFaces(const std::vector<int>& faceIndices)
         emit progressUpdated(80);
 
         if (!def.IsDone()) {
-            setError("特征删除失败（BRepAlgoAPI_Defeaturing）");
-            return false;
+            // Try alternative method: create a new shape without the selected faces
+            setError("特征删除失败（BRepAlgoAPI_Defeaturing），尝试替代方法...");
+            
+            // Alternative approach: create a compound of all faces except the ones to remove
+            BRep_Builder builder;
+            TopoDS_Compound compound;
+            builder.MakeCompound(compound);
+            
+            idx = 0;
+            bool faceRemoved = false;
+            for (TopExp_Explorer exp(healedShape, TopAbs_FACE); exp.More(); exp.Next(), ++idx) {
+                bool shouldRemove = false;
+                for (int fi : faceIndices) {
+                    if (fi == idx) {
+                        shouldRemove = true;
+                        faceRemoved = true;
+                        break;
+                    }
+                }
+                if (!shouldRemove) {
+                    builder.Add(compound, exp.Current());
+                }
+            }
+            
+            if (faceRemoved) {
+                m_shape = compound;
+                emit progressUpdated(100);
+                emit shapeChanged();
+                return true;
+            } else {
+                setError("无法删除指定面");
+                return false;
+            }
         }
 
         m_shape = def.Shape();
