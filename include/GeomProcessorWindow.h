@@ -10,6 +10,9 @@
 #include <QDoubleSpinBox>
 #include <QPushButton>
 #include <QCheckBox>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QGroupBox>
 
 // OCC
 #include <AIS_InteractiveContext.hxx>
@@ -53,15 +56,18 @@ private slots:
     void onLoadSTEP();
     void onSaveSTEP();
     void onSendResultBack();
+    void onRunGeometryCheck();
 
     // Face list selection
     void onFaceListSelectionChanged();
+    void onCheckResultItemDoubleClicked(QTreeWidgetItem* item, int column);
 
 private:
     void setupUI();
     void setupMenuBar();
     void setupToolBar();
     void setupOperationPanel();
+    void setupCheckPanel();
     void setupFaceList();
     void setupStatusBar();
     void initOCC();
@@ -107,6 +113,11 @@ private:
     // 3D 视图左下角几何信息悬浮标签
     QLabel*          m_geomInfoLabel = nullptr;
     void updateGeomInfoLabel(const QString& text);
+
+    // Check panel (UI only - checker功能代码已创建但因运行时问题暂未实例化)
+    QDockWidget*     m_checkDock = nullptr;
+    QTreeWidget*     m_checkResultTree = nullptr;
+    void updateCheckResults();
 };
 
 #endif // GEOM_PROCESSOR_WINDOW_H

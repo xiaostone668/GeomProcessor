@@ -109,6 +109,7 @@ void GeomProcessorWindow::setupUI()
     setCentralWidget(m_occWidget);
 
     setupOperationPanel();
+    setupCheckPanel();
     setupFaceList();
     setupStatusBar();
 
@@ -184,6 +185,11 @@ void GeomProcessorWindow::setupToolBar()
 
     tb->addSeparator();
 
+    auto* checkAct  = tb->addAction(tr("🔍 检查"));
+    connect(checkAct, &QAction::triggered, this, &GeomProcessorWindow::onRunGeometryCheck);
+
+    tb->addSeparator();
+
     auto* sendAct   = tb->addAction(tr("📤 发回"));
     connect(sendAct, &QAction::triggered, this, &GeomProcessorWindow::onSendResultBack);
 }
@@ -243,6 +249,99 @@ void GeomProcessorWindow::setupOperationPanel()
     lay->addStretch();
     m_opDock->setWidget(w);
     addDockWidget(Qt::RightDockWidgetArea, m_opDock);
+}
+
+void GeomProcessorWindow::setupCheckPanel()
+{
+    m_checkDock = new QDockWidget(tr("几何检查"), this);
+
+    auto* w   = new QWidget(m_checkDock);
+    auto* lay = new QVBoxLayout(w);
+
+    // 检查项选择
+    auto* faceGroup = new QGroupBox(tr("面类型"));
+    faceGroup->setCheckable(true);
+    faceGroup->setChecked(true);
+    auto* faceLay = new QVBoxLayout(faceGroup);
+
+    QCheckBox* cbDupFace    = new QCheckBox(tr("重复面：存在重复面"));
+    QCheckBox* cbInvFace    = new QCheckBox(tr("错误面：存在错误面"));
+    QCheckBox* cbSmallFace  = new QCheckBox(tr("微小面：存在微小面"));
+    cbDupFace->setChecked(true);
+    cbInvFace->setChecked(true);
+    cbSmallFace->setChecked(true);
+
+    faceLay->addWidget(cbDupFace);
+    faceLay->addWidget(cbInvFace);
+    faceLay->addWidget(cbSmallFace);
+    lay->addWidget(faceGroup);
+
+    // 检查参数
+    auto* paramBox = new QGroupBox(tr("检查参数"));
+    auto* paramLay = new QFormLayout(paramBox);
+    QDoubleSpinBox* tolSpin = new QDoubleSpinBox();
+    tolSpin->setRange(1e-6, 1.0);
+    tolSpin->setValue(0.01);
+    tolSpin->setDecimals(6);
+    paramLay->addRow(tr("公差:"), tolSpin);
+    lay->addWidget(paramBox);
+
+    // 执行检查按钮
+    auto* checkBtn = new QPushButton(tr("🔍 执行检查"));
+    checkBtn->setStyleSheet("background-color:#4CAF50;color:white;font-weight:bold;padding:8px;");
+    connect(checkBtn, &QPushButton::clicked, this, &GeomProcessorWindow::onRunGeometryCheck);
+    lay->addWidget(checkBtn);
+
+    lay->addSpacing(10);
+    auto* resLabel = new QLabel(tr("检查结果:"));
+    resLabel->setStyleSheet("font-weight:bold;");
+    lay->addWidget(resLabel);
+
+    m_checkResultTree = new QTreeWidget();
+    m_checkResultTree->setHeaderLabels(QStringList() << tr("类型") << tr("索引") << tr("描述"));
+    m_checkResultTree->setColumnWidth(0, 100);
+    m_checkResultTree->setColumnWidth(1, 60);
+    m_checkResultTree->setAlternatingRowColors(true);
+    connect(m_checkResultTree, &QTreeWidget::itemDoubleClicked,
+            this, &GeomProcessorWindow::onCheckResultItemDoubleClicked);
+    lay->addWidget(m_checkResultTree);
+
+    lay->addStretch();
+    m_checkDock->setWidget(w);
+    addDockWidget(Qt::RightDockWidgetArea, m_checkDock);
+}
+
+void GeomProcessorWindow::updateCheckResults()
+{
+    m_checkResultTree->clear();
+}
+
+void GeomProcessorWindow::onRunGeometryCheck()
+{
+    if (!m_processor->hasShape()) {
+        QMessageBox::information(this, "提示", "请先加载 STEP 文件或等待 SimulationTool 发送几何");
+        return;
+    }
+
+    m_statusLabel->setText("正在检查几何...");
+    m_progressBar->setValue(0);
+
+    m_checkResultTree->clear();
+
+    // 注意：由于实例化GeomChecker会导致程序启动崩溃，暂时显示演示信息
+    QMessageBox::information(this, "提示",
+        "几何检查UI界面已添加\n"
+        "检查功能代码已完成（GeomChecker.h/cpp）\n"
+        "但由于OpenCASCADE运行时兼容性问题暂未实例化\n"
+        "功能包括：错误面、微小面、微小边等检查");
+
+    m_statusLabel->setText("检查完成：UI界面已就绪（检查器暂未启用）");
+}
+
+void GeomProcessorWindow::onCheckResultItemDoubleClicked(QTreeWidgetItem* item, int column)
+{
+    if (!item) return;
+    m_statusLabel->setText(tr("选中问题: %1").arg(item->text(2)));
 }
 
 void GeomProcessorWindow::setupFaceList()
