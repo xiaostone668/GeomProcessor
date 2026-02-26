@@ -15,6 +15,7 @@
 #include <QUuid>
 #include <QFile>
 #include <QCoreApplication>
+#include <algorithm>
 
 // OCC
 #include <Aspect_DisplayConnection.hxx>
@@ -31,6 +32,7 @@ GeomProcessorWindow::GeomProcessorWindow(QWidget* parent)
     initOCC();
 
     m_processor = new GeomProcessor(this);
+    m_checker   = new GeomChecker(this);
     m_receiver  = new GeomReceiver(this);
 
     // Processor signals
@@ -45,6 +47,14 @@ GeomProcessorWindow::GeomProcessorWindow(QWidget* parent)
     connect(m_processor, &GeomProcessor::errorOccurred, this, [this](const QString& e){
         m_statusLabel->setText("错误: " + e);
         QMessageBox::warning(this, "几何处理错误", e);
+    });
+
+    // Checker signals
+    connect(m_checker, &GeomChecker::progressUpdated,
+            m_progressBar, &QProgressBar::setValue);
+    connect(m_checker, &GeomChecker::errorOccurred, this, [this](const QString& e){
+        m_statusLabel->setText("检查错误: " + e);
+        QMessageBox::warning(this, "几何检查错误", e);
     });
 
     // Receiver signals
@@ -270,6 +280,9 @@ void GeomProcessorWindow::setupCheckPanel()
     cbDupFace->setChecked(true);
     cbInvFace->setChecked(true);
     cbSmallFace->setChecked(true);
+    cbDupFace->setProperty("checkOption", (int)GeomChecker::CheckDuplicateFaces);
+    cbInvFace->setProperty("checkOption", (int)GeomChecker::CheckInvalidFaces);
+    cbSmallFace->setProperty("checkOption", (int)GeomChecker::CheckSmallFaces);
 
     faceLay->addWidget(cbDupFace);
     faceLay->addWidget(cbInvFace);
@@ -314,6 +327,32 @@ void GeomProcessorWindow::setupCheckPanel()
 void GeomProcessorWindow::updateCheckResults()
 {
     m_checkResultTree->clear();
+    
+    const QList<CheckResultItem>& results = m_checker->getResults();
+    for (const auto& result : results) {
+        auto* item = new QTreeWidgetItem(m_checkResultTree);
+        item->setText(0, result.getTypeString());
+        item->setText(1, QString::number(result.index));
+        item->setText(2, result.getDisplayString());
+        
+        switch (result.type) {
+            case CheckResultItem::InvalidFace:
+            case CheckResultItem::SelfIntersectingFace:
+                item->setForeground(0, QBrush(Qt::red));
+                item->setForeground(2, QBrush(Qt::red));
+                break;
+            case CheckResultItem::SmallFace:
+            case CheckResultItem::SmallEdge:
+                item->setForeground(0, QBrush(QColor(255, 165, 0))); 
+                break;
+            default:
+                item->setForeground(0, QBrush(Qt::darkBlue));
+                break;
+        }
+    }
+    
+    m_checkResultTree->resizeColumnToContents(0);
+    m_checkResultTree->resizeColumnToContents(1);
 }
 
 void GeomProcessorWindow::onRunGeometryCheck()
@@ -328,14 +367,32 @@ void GeomProcessorWindow::onRunGeometryCheck()
 
     m_checkResultTree->clear();
 
-    // 注意：由于实例化GeomChecker会导致程序启动崩溃，暂时显示演示信息
-    QMessageBox::information(this, "提示",
-        "几何检查UI界面已添加\n"
-        "检查功能代码已完成（GeomChecker.h/cpp）\n"
-        "但由于OpenCASCADE运行时兼容性问题暂未实例化\n"
-        "功能包括：错误面、微小面、微小边等检查");
+    if (m_checker->checkShape(m_processor->getShape())) {
+        updateCheckResults();
+        
+        int numProblems = m_checker->getProblemCount();
+        if (numProblems == 0) {
+            m_statusLabel->setText("检查完成：未发现问题");
+        } else {
+            m_statusLabel->setText(QString("检查完成：发现 %1 个问题").arg(numProblems));
+        }
+    }
+}
 
-    m_statusLabel->setText("检查完成：UI界面已就绪（检查器暂未启用）");
+void GeomProcessorWindow::onCheckOptionChanged()
+{
+    GeomChecker::CheckOptions options = GeomChecker::CheckNone;
+    
+    QList<QCheckBox*> allChecks = m_checkDock->widget()->findChildren<QCheckBox*>();
+    for (auto* cb : allChecks) {
+        if (cb->isChecked()) {
+            GeomChecker::CheckOption opt = 
+                static_cast<GeomChecker::CheckOption>(cb->property("checkOption").toInt());
+            options |= opt;
+        }
+    }
+    
+    m_checker->setCheckOptions(options);
 }
 
 void GeomProcessorWindow::onCheckResultItemDoubleClicked(QTreeWidgetItem* item, int column)

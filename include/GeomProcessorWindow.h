@@ -24,6 +24,7 @@
 #include "OccViewWidget.h"
 #include "GeomReceiver.h"
 #include "GeomProcessor.h"
+#include "GeomChecker.h"
 
 /**
  * @brief 应用 B 主窗口
@@ -57,6 +58,7 @@ private slots:
     void onSaveSTEP();
     void onSendResultBack();
     void onRunGeometryCheck();
+    void onCheckOptionChanged();
 
     // Face list selection
     void onFaceListSelectionChanged();
@@ -75,6 +77,8 @@ private:
     void refreshFaceList();
     void displayCurrentShape();
     void updateStatusInfo();
+    
+    void updateCheckResults();
     
     // 自动保存并发送结果
     bool autoSaveAndSend();
@@ -95,6 +99,9 @@ private:
     // Processor
     GeomProcessor*   m_processor    = nullptr;
 
+    // Checker
+    GeomChecker*     m_checker      = nullptr;
+
     // Operation panel
     QDockWidget*     m_opDock       = nullptr;
     QDoubleSpinBox*  m_stitchTolSpin= nullptr;
@@ -114,10 +121,9 @@ private:
     QLabel*          m_geomInfoLabel = nullptr;
     void updateGeomInfoLabel(const QString& text);
 
-    // Check panel (UI only - checker功能代码已创建但因运行时问题暂未实例化)
+    // Check panel
     QDockWidget*     m_checkDock = nullptr;
     QTreeWidget*     m_checkResultTree = nullptr;
-    void updateCheckResults();
 };
 
 #endif // GEOM_PROCESSOR_WINDOW_H
