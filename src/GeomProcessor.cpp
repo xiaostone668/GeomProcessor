@@ -61,6 +61,7 @@ bool GeomProcessor::loadSTEP(const QString& filePath)
             setError("STEP 文件不包含有效几何体");
             return false;
         }
+        m_numSewnShells = 0;
         emit shapeChanged();
         return true;
     }
@@ -78,7 +79,11 @@ bool GeomProcessor::saveSTEP(const QString& filePath) const
     }
     try {
         STEPControl_Writer writer;
-        writer.Transfer(m_shape, STEPControl_AsIs);
+        
+        // 设置写入模式为ManifoldSolidBrep，确保保存所有几何数据
+        // 使用AsIs可能只保存部分数据，使用ManifoldSolidBrep确保完整性
+        writer.Transfer(m_shape, STEPControl_ManifoldSolidBrep);
+        
         IFSelect_ReturnStatus stat =
             writer.Write(filePath.toStdString().c_str());
         if (stat != IFSelect_RetDone) {
@@ -109,6 +114,11 @@ bool GeomProcessor::stitchShells(double tolerance)
         sewing.Add(m_shape);
 
         emit progressUpdated(40);
+        
+        // 统计缝合前的shell数量
+        int shellsBefore = numShells();
+        m_numSewnShells = shellsBefore;
+        
         sewing.Perform();
         emit progressUpdated(80);
 
@@ -118,6 +128,11 @@ bool GeomProcessor::stitchShells(double tolerance)
             return false;
         }
         m_shape = sewn;
+        
+        // 更新缝合信息
+        int shellsAfter = numShells();
+        m_numSewnShells = shellsBefore - shellsAfter;
+        
         emit progressUpdated(100);
         emit shapeChanged();
         return true;
@@ -298,6 +313,13 @@ int GeomProcessor::numFaces() const
 {
     int n = 0;
     for (TopExp_Explorer e(m_shape, TopAbs_FACE); e.More(); e.Next()) ++n;
+    return n;
+}
+
+int GeomProcessor::numShells() const
+{
+    int n = 0;
+    for (TopExp_Explorer e(m_shape, TopAbs_SHELL); e.More(); e.Next()) ++n;
     return n;
 }
 

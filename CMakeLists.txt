@@ -10,21 +10,31 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # -----------------------------------------------------------------------
-# Qt 6
+# Qt 5.6.3
 # -----------------------------------------------------------------------
-set(Qt6_DIR "D:/ProgramFiles/Qt/6.7.3/msvc2022_64/lib/cmake/Qt6" CACHE PATH "Qt6 cmake path")
-set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};D:/ProgramFiles/Qt/6.7.3/msvc2022_64/lib/cmake")
+set(Qt5_DIR "D:/Qt/Qt5.6.3/5.6.3/msvc2015_64/lib/cmake/Qt5" CACHE PATH "Qt5 cmake path")
+set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};D:/Qt/Qt5.6.3/5.6.3/msvc2015_64/lib/cmake")
 
-find_package(Qt6 6.7 REQUIRED COMPONENTS Core Widgets OpenGL)
-set(QT_LIBS Qt6::Widgets Qt6::OpenGL)
-message(STATUS "Qt6 found: ${Qt6_VERSION}")
+find_package(Qt5 5.6 REQUIRED COMPONENTS Core Widgets OpenGL)
+set(QT_LIBS Qt5::Widgets Qt5::OpenGL)
+message(STATUS "Qt5 found: ${Qt5_VERSION}")
 
 # -----------------------------------------------------------------------
-# OpenCASCADE 7.9.3
+# OpenCASCADE 7.7.0
 # -----------------------------------------------------------------------
-set(OCC_ROOT "D:/SDK/opencascade-7.9.3-vc14-64" CACHE PATH "OCCT root")
-set(OCC_LIB_DIR "${OCC_ROOT}/win64/vc14/lib")
-set(OCC_BIN_DIR "${OCC_ROOT}/win64/vc14/bin")
+set(OCC_ROOT "D:/OpenCASCADE-7.7.0" CACHE PATH "OCCT root")
+# Auto-detect lib dir: try win64/vc14/lib then lib
+set(_OCC_LIB_CANDIDATES "${OCC_ROOT}/win64/vc14/lib" "${OCC_ROOT}/lib")
+set(OCC_LIB_DIR "${OCC_ROOT}/opencascade-7.7.0/win64/vc14/lib" CACHE PATH "OCCT library directory")
+foreach(_dir ${_OCC_LIB_CANDIDATES})
+  if(EXISTS "${_dir}/TKernel.lib")
+    set(OCC_LIB_DIR "${_dir}" CACHE PATH "OCCT library directory" FORCE)
+    message(STATUS "Found OCCT libs in: ${_dir}")
+    break()
+  endif()
+endforeach()
+# OCCT bin dir (DLLs)
+set(OCC_BIN_DIR "${OCC_ROOT}/opencascade-7.7.0/win64/vc14/bin")
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -35,15 +45,14 @@ include_directories(
 set(_OCC_LIB_NAMES
     TKernel TKMath TKBRep TKGeomBase TKGeomAlgo TKG3d TKG2d TKTopAlgo TKPrim
     TKXSBase TKV3d TKService TKOpenGl
-    TKDESTEP TKDE
+    # STEP (OCCT 7.7.0 uses legacy STEP libs)
+    TKSTEP TKSTEPAttr TKSTEPBase TKSTEP209
     # ShapeFix
     TKShHealing
     # Boolean / Defeaturing
     TKBO TKBool
     # Offset
     TKOffset TKFeat
-    # STEP write
-    TKXSBase
 )
 list(REMOVE_DUPLICATES _OCC_LIB_NAMES)
 
@@ -84,6 +93,11 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${OCC_ROOT}/inc
 )
 
+# Set UTF-8 encoding for MSVC compiler to fix Chinese character display
+if(MSVC)
+  target_compile_options(${PROJECT_NAME} PRIVATE /utf-8)
+endif()
+
 target_link_libraries(${PROJECT_NAME}
     ${QT_LIBS}
     ${_OCC_LIBS_FOUND}
@@ -107,19 +121,16 @@ if(WIN32)
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
         COMMENT "Copying OCCT .lib-side DLLs")
 
-    # Third-party DLLs (same as SimulationTool)
-    set(_SDK_BASE "D:/SDK/3rdparty-vc14-64")
+    # Third-party DLLs (from OpenCASCADE installation)
+    set(_OCC_BASE "D:/OpenCASCADE-7.7.0")
     set(_EXTRA_DLLS
-        "${_SDK_BASE}/openvr-1.14.15-64/bin/win64/openvr_api.dll"
-        "${_SDK_BASE}/freeimage-3.18.0-x64/bin/FreeImage.dll"
-        "${_SDK_BASE}/ffmpeg-3.3.4-64/bin/avcodec-57.dll"
-        "${_SDK_BASE}/ffmpeg-3.3.4-64/bin/avformat-57.dll"
-        "${_SDK_BASE}/ffmpeg-3.3.4-64/bin/swscale-4.dll"
-        "${_SDK_BASE}/ffmpeg-3.3.4-64/bin/avutil-55.dll"
-        "${_SDK_BASE}/tbb-2021.13.0-x64/bin/tbb12.dll"
-        "${_SDK_BASE}/tbb-2021.13.0-x64/bin/tbbmalloc.dll"
-        "${_SDK_BASE}/jemalloc-vc14-64/bin/jemalloc.dll"
-        "${_SDK_BASE}/freetype-2.13.3-x64/bin/freetype.dll"
+        "${_OCC_BASE}/freeimage-3.17.0-vc14-64/bin/FreeImage.dll"
+        "${_OCC_BASE}/ffmpeg-3.3.4-64/bin/avcodec-57.dll"
+        "${_OCC_BASE}/ffmpeg-3.3.4-64/bin/avformat-57.dll"
+        "${_OCC_BASE}/ffmpeg-3.3.4-64/bin/swscale-4.dll"
+        "${_OCC_BASE}/ffmpeg-3.3.4-64/bin/avutil-55.dll"
+        "${_OCC_BASE}/tbb_2021.5-vc14-64/bin/tbb12.dll"
+        "${_OCC_BASE}/freetype-2.5.5-vc14-64/bin/freetype.dll"
     )
     foreach(_dll ${_EXTRA_DLLS})
         if(EXISTS "${_dll}")
@@ -130,15 +141,15 @@ if(WIN32)
         endif()
     endforeach()
 
-    # Qt DLLs
-    set(_QT_BIN "D:/ProgramFiles/Qt/6.7.3/msvc2022_64")
-    foreach(_qtdll Qt6Core Qt6Gui Qt6Widgets Qt6OpenGL Qt6Network Qt6Svg)
+    # Qt5 DLLs
+    set(_QT_BIN "D:/Qt/Qt5.6.3/5.6.3/msvc2015_64")
+    foreach(_qtdll Qt5Core Qt5Gui Qt5Widgets Qt5OpenGL)
         if(EXISTS "${_QT_BIN}/bin/${_qtdll}.dll")
             add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${_QT_BIN}/bin/${_qtdll}.dll"
                     "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-                COMMENT "Copying Qt DLL: ${_qtdll}.dll")
+                COMMENT "Copying Qt5 DLL: ${_qtdll}.dll")
         endif()
     endforeach()
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
@@ -147,5 +158,5 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${_QT_BIN}/plugins/platforms/qwindows.dll"
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/platforms/qwindows.dll"
-        COMMENT "Copying Qt platform plugin")
+        COMMENT "Copying Qt5 platform plugin")
 endif()

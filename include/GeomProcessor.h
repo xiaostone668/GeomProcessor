@@ -50,8 +50,12 @@ public:
     bool           hasShape() const { return !m_shape.IsNull(); }
     TopoDS_Shape   getShape() const { return m_shape; }
     int            numFaces() const;
+    int            numShells() const;
     int            numSolids() const;
     QString        getLastError() const { return m_lastError; }
+    
+    // ---- 缝合查询 ----
+    int            numSewnShells() const { return m_numSewnShells; }
 
     // ---- 显示 ----
     void displayShape(const Handle(AIS_InteractiveContext)& ctx, bool fitAll = true);
@@ -68,6 +72,7 @@ private:
     TopoDS_Shape       m_shape;
     Handle(AIS_Shape)  m_aisShape;
     QString            m_lastError;
+    int                m_numSewnShells = 0;
 };
 
 #endif // GEOM_PROCESSOR_H

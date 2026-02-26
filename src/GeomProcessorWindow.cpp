@@ -200,7 +200,7 @@ void GeomProcessorWindow::setupOperationPanel()
     auto* sf = new QFormLayout(stitchBox);
     m_stitchTolSpin = new QDoubleSpinBox();
     m_stitchTolSpin->setRange(1e-6, 10.0);
-    m_stitchTolSpin->setValue(1e-3);
+    m_stitchTolSpin->setValue(0.01);
     m_stitchTolSpin->setDecimals(6);
     sf->addRow(tr("公差:"), m_stitchTolSpin);
     auto* stitchBtn = new QPushButton(tr("执行缝合"));
@@ -333,8 +333,29 @@ void GeomProcessorWindow::onStitchShells()
     m_statusLabel->setText("正在缝合...");
     m_progressBar->setValue(0);
     if (m_processor->stitchShells(m_stitchTolSpin->value())) {
-        m_statusLabel->setText(QString("缝合完成 | %1 个面 | %2 个实体")
-            .arg(m_processor->numFaces()).arg(m_processor->numSolids()));
+        int sewn = m_processor->numSewnShells();
+        int remaining = m_processor->numShells();
+        QString resultText;
+        
+        if (sewn > 0) {
+            if (remaining == 1) {
+                resultText = QString("缝合完成 | %1 个Shell已合并为1个Shell | %2 个面 | %3 个实体")
+                    .arg(sewn).arg(m_processor->numFaces()).arg(m_processor->numSolids());
+            } else {
+                resultText = QString("缝合完成 | %1 个Shell已合并为%2个Shell | %3 个面 | %4 个实体")
+                    .arg(sewn).arg(remaining).arg(m_processor->numFaces()).arg(m_processor->numSolids());
+            }
+        } else {
+            resultText = QString("缝合完成 | 无Shell被合并 | %1 个Shell | %2 个面 | %3 个实体")
+                .arg(remaining).arg(m_processor->numFaces()).arg(m_processor->numSolids());
+        }
+        
+        m_statusLabel->setText(resultText);
+        
+        // 自动保存并发送结果回SimulationTool
+        if (autoSaveAndSend()) {
+            m_statusLabel->setText(resultText + " | 已自动保存并发送");
+        }
     }
 }
 
@@ -427,7 +448,9 @@ void GeomProcessorWindow::onSendResultBack()
     // 确保目录存在
     QDir().mkpath(returnedDir);
 
-    QString guid    = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    // Qt 5.6 doesn't have QUuid::WithoutBraces, so remove braces manually
+    QString guid    = QUuid::createUuid().toString();
+    guid.remove('{').remove('}');
     QString tmpFile = QDir(returnedDir).filePath(guid + ".stp");
 
     if (!m_processor->saveSTEP(tmpFile)) {
@@ -483,10 +506,44 @@ void GeomProcessorWindow::displayCurrentShape()
 void GeomProcessorWindow::updateStatusInfo()
 {
     int nFaces   = m_processor->numFaces();
+    int nShells  = m_processor->numShells();
     int nSolids  = m_processor->numSolids();
     m_statusLabel->setText(
-        QString("几何就绪 | %1 个面 | %2 个实体").arg(nFaces).arg(nSolids));
+        QString("几何就绪 | %1 个面 | %2 个Shell | %3 个实体").arg(nFaces).arg(nShells).arg(nSolids));
     // 更新左下角悬浮信息
     updateGeomInfoLabel(
-        QString("面: %1   实体: %2").arg(nFaces).arg(nSolids));
+        QString("面: %1   Shell: %2   实体: %3").arg(nFaces).arg(nShells).arg(nSolids));
+}
+
+bool GeomProcessorWindow::autoSaveAndSend()
+{
+    if (!m_processor->hasShape()) {
+        return false;
+    }
+    
+    // 保存结果到临时文件
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString returnedDir = QDir::cleanPath(appDir + "/../../example/returned");
+    if (!QDir(returnedDir).exists()) {
+        returnedDir = QDir::cleanPath(appDir + "/../example/returned");
+    }
+    if (!QDir(returnedDir).exists()) {
+        returnedDir = QDir::cleanPath(appDir + "/example/returned");
+    }
+    QDir().mkpath(returnedDir);
+    
+    QString guid    = QUuid::createUuid().toString();
+    guid.remove('{').remove('}');
+    QString tmpFile = QDir(returnedDir).filePath(guid + ".stp");
+    
+    if (!m_processor->saveSTEP(tmpFile)) {
+        QString tmpDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+        tmpFile = QDir(tmpDir).filePath("geomproc_result_" + guid + ".stp");
+        if (!m_processor->saveSTEP(tmpFile)) {
+            return false;
+        }
+    }
+    
+    // 发送回SimulationTool
+    return m_receiver->sendResult(tmpFile);
 }

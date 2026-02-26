@@ -69,6 +69,9 @@ private:
     void refreshFaceList();
     void displayCurrentShape();
     void updateStatusInfo();
+    
+    // 自动保存并发送结果
+    bool autoSaveAndSend();
 
     // OCC
     Handle(Aspect_DisplayConnection) m_displayConnection;
