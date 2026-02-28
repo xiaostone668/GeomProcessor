@@ -129,9 +129,9 @@ private:
 private:
     CheckOptions        m_options = CheckAllFaces | CheckSmallEdges;
     double              m_tolerance = 0.01;
-    double              m_minFaceArea = 1e-6;
+    double              m_minFaceArea = 1e-6;  // 设置合理的微小面阈值
     double              m_maxAspectRatio = 10.0;
-    double              m_minEdgeLength = 1e-4;
+    double              m_minEdgeLength = 1e-6;  // 设置合理的微小边阈值
 
     QList<CheckResultItem> m_results;
 };

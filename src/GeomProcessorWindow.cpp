@@ -15,15 +15,31 @@
 #include <QUuid>
 #include <QFile>
 #include <QCoreApplication>
+#include <QTreeWidget>
+#include <QDebug>
 #include <algorithm>
+#include <QCheckBox>
 
 // OCC
 #include <Aspect_DisplayConnection.hxx>
 #include <OpenGl_GraphicDriver.hxx>
 #include <V3d_View.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopExp.hxx>
 #include <TopAbs.hxx>
+#include <TopoDS.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopoDS_Solid.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopoDS_Edge.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRep_Tool.hxx>
+#include <Geom_Curve.hxx>
+#include <GeomAdaptor_Curve.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
 
 GeomProcessorWindow::GeomProcessorWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -40,6 +56,8 @@ GeomProcessorWindow::GeomProcessorWindow(QWidget* parent)
             this, &GeomProcessorWindow::displayCurrentShape);
     connect(m_processor, &GeomProcessor::shapeChanged,
             this, &GeomProcessorWindow::refreshFaceList);
+    connect(m_processor, &GeomProcessor::shapeChanged,
+            this, &GeomProcessorWindow::refreshGeometryTree);
     connect(m_processor, &GeomProcessor::shapeChanged,
             this, &GeomProcessorWindow::updateStatusInfo);
     connect(m_processor, &GeomProcessor::progressUpdated,
@@ -121,6 +139,7 @@ void GeomProcessorWindow::setupUI()
     setupOperationPanel();
     setupCheckPanel();
     setupFaceList();
+    setupGeometryTree();
     setupStatusBar();
 
     // 几何信息悬浮标签（浮在 3D 视图左下角，父对象为主窗口）
@@ -216,9 +235,12 @@ void GeomProcessorWindow::setupOperationPanel()
     auto* sf = new QFormLayout(stitchBox);
     m_stitchTolSpin = new QDoubleSpinBox();
     m_stitchTolSpin->setRange(1e-6, 10.0);
-    m_stitchTolSpin->setValue(0.01);
+    m_stitchTolSpin->setValue(0.1);
     m_stitchTolSpin->setDecimals(6);
-    sf->addRow(tr("公差:"), m_stitchTolSpin);
+    sf->addRow(tr("容差:"), m_stitchTolSpin);
+    m_convertToSolidCheck = new QCheckBox(tr("水密时转换为实体"));
+    m_convertToSolidCheck->setChecked(false);
+    sf->addRow(m_convertToSolidCheck);
     auto* stitchBtn = new QPushButton(tr("执行缝合"));
     connect(stitchBtn, &QPushButton::clicked, this, &GeomProcessorWindow::onStitchShells);
     sf->addRow(stitchBtn);
@@ -412,6 +434,19 @@ void GeomProcessorWindow::setupFaceList()
     addDockWidget(Qt::LeftDockWidgetArea, m_faceDock);
 }
 
+void GeomProcessorWindow::setupGeometryTree()
+{
+    m_geomTreeDock = new QDockWidget(tr("几何体浏览树"), this);
+    m_geomTree = new QTreeWidget(m_geomTreeDock);
+    m_geomTree->setHeaderLabels(QStringList() << tr("类型") << tr("索引") << tr("信息"));
+    m_geomTree->setColumnWidth(0, 100);
+    m_geomTree->setColumnWidth(1, 60);
+    m_geomTree->setAlternatingRowColors(true);
+    m_geomTree->setRootIsDecorated(true);
+    m_geomTreeDock->setWidget(m_geomTree);
+    addDockWidget(Qt::LeftDockWidgetArea, m_geomTreeDock);
+}
+
 void GeomProcessorWindow::setupStatusBar()
 {
     m_statusLabel = new QLabel(tr("就绪"));
@@ -508,9 +543,24 @@ void GeomProcessorWindow::onStitchShells()
         
         m_statusLabel->setText(resultText);
         
+        // 如果勾选了"水密时转换为实体"，尝试转换
+        bool converted = false;
+        if (m_convertToSolidCheck->isChecked()) {
+            if (m_processor->convertShellToSolid()) {
+                converted = true;
+            }
+        }
+        
         // 自动保存并发送结果回SimulationTool
         if (autoSaveAndSend()) {
-            m_statusLabel->setText(resultText + " | 已自动保存并发送");
+            // 在shapeChanged更新信息后，添加"已发送"信息
+            QString currentText = m_statusLabel->text();
+            if (converted) {
+                m_statusLabel->setText(QString("缝合完成并转换为实体 | 已发送 | %1 个面 | %2 个Shell | %3 个实体")
+                    .arg(m_processor->numFaces()).arg(0).arg(m_processor->numSolids()));
+            } else {
+                m_statusLabel->setText(currentText + " | 已自动保存并发送");
+            }
         }
     }
 }
@@ -643,13 +693,229 @@ void GeomProcessorWindow::refreshFaceList()
     m_faceList->clear();
     if (!m_processor->hasShape()) return;
 
-    int idx = 0;
+    int idx = 1;
     TopExp_Explorer exp(m_processor->getShape(), TopAbs_FACE);
     for (; exp.More(); exp.Next(), ++idx) {
         auto* item = new QListWidgetItem(QString("面 %1").arg(idx));
         item->setData(Qt::UserRole, idx);
         m_faceList->addItem(item);
     }
+}
+
+void GeomProcessorWindow::refreshGeometryTree()
+{
+    m_geomTree->clear();
+    if (!m_processor->hasShape()) return;
+
+    // 统计总数
+    int totalSolids = 0;
+    int totalShells = 0;
+    int totalFaces = 0;
+    int totalEdges = 0;
+    
+    TopExp_Explorer solidExp(m_processor->getShape(), TopAbs_SOLID);
+    for (; solidExp.More(); solidExp.Next()) totalSolids++;
+    
+    TopExp_Explorer shellExp(m_processor->getShape(), TopAbs_SHELL);
+    for (; shellExp.More(); shellExp.Next()) totalShells++;
+    
+    TopExp_Explorer faceExp(m_processor->getShape(), TopAbs_FACE);
+    for (; faceExp.More(); faceExp.Next()) totalFaces++;
+    
+    TopExp_Explorer edgeExp(m_processor->getShape(), TopAbs_EDGE);
+    for (; edgeExp.More(); edgeExp.Next()) totalEdges++;
+    
+    // 添加根节点
+    auto* root = new QTreeWidgetItem(m_geomTree);
+    root->setText(0, QString::fromUtf8("几何体"));
+    root->setText(1, "");
+    root->setText(2, QString::fromUtf8("%1 个实体, %2 个Shell, %3 个面, %4 条边")
+        .arg(totalSolids).arg(totalShells).arg(totalFaces).arg(totalEdges));
+    root->setForeground(0, QBrush(Qt::darkBlue));
+    
+    // 优先显示Solids（如果存在）
+    if (totalSolids > 0) {
+        int solidIdx = 1;
+        for (TopExp_Explorer solidIter(m_processor->getShape(), TopAbs_SOLID); 
+             solidIter.More(); solidIter.Next(), solidIdx++) {
+            TopoDS_Solid solid = TopoDS::Solid(solidIter.Current());
+            
+            auto* solidItem = new QTreeWidgetItem(root);
+            solidItem->setText(0, QString::fromUtf8("实体 %1").arg(solidIdx));
+            solidItem->setText(1, QString::number(solidIdx));
+            
+            // 统计该实体的面数
+            int solidFaceCount = 0;
+            int solidEdgeCount = 0;
+            for (TopExp_Explorer exp(solid, TopAbs_FACE); exp.More(); exp.Next()) solidFaceCount++;
+            for (TopExp_Explorer exp(solid, TopAbs_EDGE); exp.More(); exp.Next()) solidEdgeCount++;
+            solidItem->setText(2, QString::fromUtf8("%1 个面, %2 条边").arg(solidFaceCount).arg(solidEdgeCount));
+            solidItem->setForeground(0, QBrush(QColor(128, 0, 128))); // 紫色
+            
+            // 遍历该实体的所有Faces
+            int faceIdx = 1;
+            for (TopExp_Explorer faceIter(solid, TopAbs_FACE); 
+                 faceIter.More(); faceIter.Next(), faceIdx++) {
+                TopoDS_Face face = TopoDS::Face(faceIter.Current());
+                
+                auto* faceItem = new QTreeWidgetItem(solidItem);
+                faceItem->setText(0, QString::fromUtf8("面 %1").arg(faceIdx));
+                faceItem->setText(1, QString::number(faceIdx));
+                
+                // 统计该面的边数
+                int faceEdgeCount = 0;
+                for (TopExp_Explorer exp(face, TopAbs_EDGE); exp.More(); exp.Next()) faceEdgeCount++;
+                faceItem->setText(2, QString::fromUtf8("%1 条边").arg(faceEdgeCount));
+                faceItem->setForeground(0, QBrush(QColor(0, 100, 200))); // 蓝色
+                
+                // 计算面的面积
+                double faceArea = 0.0;
+                try {
+                    Bnd_Box box;
+                    BRepBndLib::Add(face, box);
+                    double xMin, yMin, zMin, xMax, yMax, zMax;
+                    box.Get(xMin, yMin, zMin, xMax, yMax, zMax);
+                    double dx = xMax - xMin;
+                    double dy = yMax - yMin;
+                    double dz = zMax - zMin;
+                    double dims[3] = {dx, dy, dz};
+                    std::sort(dims, dims + 3);
+                    faceArea = dims[1] * dims[2];
+                } catch (...) {
+                    faceArea = 0.0;
+                }
+                
+                // 在面节点下添加面积信息作为子节点
+                auto* areaItem = new QTreeWidgetItem(faceItem);
+                areaItem->setText(0, QString::fromUtf8("  面积"));
+                areaItem->setText(1, "");
+                areaItem->setText(2, QString("%1").arg(faceArea, 0, 'g', 6));
+                areaItem->setForeground(0, QBrush(Qt::gray));
+                
+                // 遍历该面的所有Edges
+                int edgeIdx = 1;
+                for (TopExp_Explorer edgeIter(face, TopAbs_EDGE); 
+                     edgeIter.More(); edgeIter.Next(), edgeIdx++) {
+                    TopoDS_Edge edge = TopoDS::Edge(edgeIter.Current());
+                    
+                    auto* edgeItem = new QTreeWidgetItem(faceItem);
+                    edgeItem->setText(0, QString::fromUtf8("  边 %1").arg(edgeIdx));
+                    edgeItem->setText(1, QString::number(edgeIdx));
+                    
+                    // 计算边的长度
+                    double edgeLength = 0.0;
+                    try {
+                        Standard_Real first, last;
+                        Handle(Geom_Curve) curve = BRep_Tool::Curve(edge, first, last);
+                        if (!curve.IsNull()) {
+                            GeomAdaptor_Curve adaptor(curve);
+                            edgeLength = GCPnts_AbscissaPoint::Length(adaptor, first, last);
+                        }
+                    } catch (...) {
+                        edgeLength = 0.0;
+                    }
+                    
+                    edgeItem->setText(2, QString::fromUtf8("长度: %1").arg(edgeLength));
+                    edgeItem->setForeground(0, QBrush(Qt::darkGreen));
+                }
+            }
+            
+            solidItem->setExpanded(true);
+        }
+    } else {
+        // 如果没有Solid，显示Shells
+        int shellIdx = 1;
+        for (TopExp_Explorer shellIter(m_processor->getShape(), TopAbs_SHELL); 
+             shellIter.More(); shellIter.Next(), shellIdx++) {
+        TopoDS_Shell shell = TopoDS::Shell(shellIter.Current());
+        
+        auto* shellItem = new QTreeWidgetItem(root);
+        shellItem->setText(0, QString::fromUtf8("Shell %1").arg(shellIdx));
+        shellItem->setText(1, QString::number(shellIdx));
+        
+        // 统计该Shell的面数
+        int shellFaceCount = 0;
+        int shellEdgeCount = 0;
+        for (TopExp_Explorer exp(shell, TopAbs_FACE); exp.More(); exp.Next()) shellFaceCount++;
+        for (TopExp_Explorer exp(shell, TopAbs_EDGE); exp.More(); exp.Next()) shellEdgeCount++;
+        shellItem->setText(2, QString::fromUtf8("%1 个面, %2 条边").arg(shellFaceCount).arg(shellEdgeCount));
+        shellItem->setForeground(0, QBrush(QColor(128, 0, 128))); // 紫色
+        
+        // 遍历该Shell的所有Faces
+        int faceIdx = 1;
+        for (TopExp_Explorer faceIter(shell, TopAbs_FACE); 
+             faceIter.More(); faceIter.Next(), faceIdx++) {
+            TopoDS_Face face = TopoDS::Face(faceIter.Current());
+            
+            auto* faceItem = new QTreeWidgetItem(shellItem);
+            faceItem->setText(0, QString::fromUtf8("面 %1").arg(faceIdx));
+            faceItem->setText(1, QString::number(faceIdx));
+            
+            // 统计该面的边数
+            int faceEdgeCount = 0;
+            for (TopExp_Explorer exp(face, TopAbs_EDGE); exp.More(); exp.Next()) faceEdgeCount++;
+            faceItem->setText(2, QString::fromUtf8("%1 条边").arg(faceEdgeCount));
+            faceItem->setForeground(0, QBrush(QColor(0, 100, 200))); // 蓝色
+            
+            // 计算面的面积
+            double faceArea = 0.0;
+            try {
+                Bnd_Box box;
+                BRepBndLib::Add(face, box);
+                double xMin, yMin, zMin, xMax, yMax, zMax;
+                box.Get(xMin, yMin, zMin, xMax, yMax, zMax);
+                double dx = xMax - xMin;
+                double dy = yMax - yMin;
+                double dz = zMax - zMin;
+                double dims[3] = {dx, dy, dz};
+                std::sort(dims, dims + 3);
+                faceArea = dims[1] * dims[2];
+            } catch (...) {
+                faceArea = 0.0;
+            }
+            
+            // 在面节点下添加面积信息作为子节点
+            auto* areaItem = new QTreeWidgetItem(faceItem);
+            areaItem->setText(0, QString::fromUtf8("  面积"));
+            areaItem->setText(1, "");
+            areaItem->setText(2, QString("%1").arg(faceArea, 0, 'g', 6));
+            areaItem->setForeground(0, QBrush(Qt::gray));
+            
+            // 遍历该面的所有Edges
+            int edgeIdx = 1;
+            for (TopExp_Explorer edgeIter(face, TopAbs_EDGE); 
+                 edgeIter.More(); edgeIter.Next(), edgeIdx++) {
+                TopoDS_Edge edge = TopoDS::Edge(edgeIter.Current());
+                
+                auto* edgeItem = new QTreeWidgetItem(faceItem);
+                edgeItem->setText(0, QString::fromUtf8("  边 %1").arg(edgeIdx));
+                edgeItem->setText(1, QString::number(edgeIdx));
+                
+                // 计算边的长度
+                double edgeLength = 0.0;
+                try {
+                    Standard_Real first, last;
+                    Handle(Geom_Curve) curve = BRep_Tool::Curve(edge, first, last);
+                    if (!curve.IsNull()) {
+                        GeomAdaptor_Curve adaptor(curve);
+                        edgeLength = GCPnts_AbscissaPoint::Length(adaptor, first, last);
+                    }
+                } catch (...) {
+                    edgeLength = 0.0;
+                }
+                
+                edgeItem->setText(2, QString::fromUtf8("长度: %1").arg(edgeLength));
+                edgeItem->setForeground(0, QBrush(Qt::darkGreen));
+            }
+        }
+        
+        shellItem->setExpanded(true);
+        }
+    }
+    
+    root->setExpanded(true);
+    m_geomTree->resizeColumnToContents(0);
+    m_geomTree->resizeColumnToContents(1);
 }
 
 void GeomProcessorWindow::displayCurrentShape()
@@ -664,11 +930,20 @@ void GeomProcessorWindow::updateStatusInfo()
     int nFaces   = m_processor->numFaces();
     int nShells  = m_processor->numShells();
     int nSolids  = m_processor->numSolids();
+    
+    // 如果有Solid，Shell内嵌在Solid中，不应显示Shell数量
+    QString shellInfo;
+    if (nSolids > 0) {
+        shellInfo = "";  // 不显示Shell信息
+    } else {
+        shellInfo = QString("%1 个Shell | ").arg(nShells);
+    }
+    
     m_statusLabel->setText(
-        QString("几何就绪 | %1 个面 | %2 个Shell | %3 个实体").arg(nFaces).arg(nShells).arg(nSolids));
+        QString("几何就绪 | %1 个面 | %2 %3 个实体").arg(nFaces).arg(shellInfo).arg(nSolids));
     // 更新左下角悬浮信息
     updateGeomInfoLabel(
-        QString("面: %1   Shell: %2   实体: %3").arg(nFaces).arg(nShells).arg(nSolids));
+        QString("面: %1   Shell: %2   实体: %3").arg(nFaces).arg(nSolids > 0 ? 0 : nShells).arg(nSolids));
 }
 
 bool GeomProcessorWindow::autoSaveAndSend()
@@ -702,4 +977,22 @@ bool GeomProcessorWindow::autoSaveAndSend()
     
     // 发送回SimulationTool
     return m_receiver->sendResult(tmpFile);
+}
+
+void GeomProcessorWindow::onCheckGeometry()
+{
+    if (!m_processor->hasShape()) {
+        QMessageBox::information(this, "提示", "请先加载 STEP 文件或等待 SimulationTool 发送几何");
+        return;
+    }
+
+    if (!m_checkDialog) {
+        m_checkDialog = new GeometryCheckDialog(this);
+        m_checkDialog->setChecker(m_checker);
+    }
+
+    m_checkDialog->setShape(m_processor->getShape());
+    m_checkDialog->show();
+    m_checkDialog->raise();
+    m_checkDialog->activateWindow();
 }

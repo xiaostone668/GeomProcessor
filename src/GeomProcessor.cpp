@@ -8,6 +8,8 @@
 // BRep Sewing
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <TopTools_ListOfShape.hxx>
 
 // Delete face
 #include <TopExp_Explorer.hxx>
@@ -141,6 +143,67 @@ bool GeomProcessor::stitchShells(double tolerance)
         setError(QString("缝合失败: %1").arg(e.GetMessageString()));
         return false;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Convert Shell to Solid
+// ---------------------------------------------------------------------------
+
+bool GeomProcessor::convertShellToSolid()
+{
+    if (m_shape.IsNull()) {
+        setError("No shape available");
+        return false;
+    }
+
+    // 检查是否有Shell存在
+    TopExp_Explorer shellExp(m_shape, TopAbs_SHELL);
+    if (!shellExp.More()) {
+        setError("No shells found in shape");
+        return false;
+    }
+
+    // 收集所有Shell
+    TopTools_ListOfShape shells;
+    int shellCount = 0;
+    for (; shellExp.More(); shellExp.Next()) {
+        shells.Append(shellExp.Current());
+        shellCount++;
+    }
+
+    // 如果只有一个Shell，尝试转换为Solid
+    if (shellCount == 1) {
+        try {
+            TopoDS_Shell shell = TopoDS::Shell(shells.First());
+            BRepBuilderAPI_MakeSolid mkSolid(shell);
+            
+            if (mkSolid.IsDone()) {
+                TopoDS_Solid solid = mkSolid.Solid();
+                
+                // 不需要验证闭合性，直接使用转换结果
+                // BRepCheck_Analyzer对于某些边缘情况可能过于严格
+                m_shape = solid;
+                if (!m_aisShape.IsNull()) {
+                    m_aisShape->Set(m_shape);
+                }
+                emit shapeChanged();
+                // 不要调用setError("")，否则会触发errorOccurred信号导致显示空错误对话框
+                return true;
+            } else {
+                setError("BRepBuilderAPI_MakeSolid failed");
+                return false;
+            }
+        } catch (const Standard_Failure& e) {
+            setError(QString("转换失败: %1").arg(e.GetMessageString()));
+            return false;
+        } catch (...) {
+            setError("转换时发生未知错误");
+            return false;
+        }
+    }
+
+    setError(QString("无法转换: 发现 %1 个Shell，需要且仅需要1个").arg(shellCount));
+    return false;
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopAbs.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepTools.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
@@ -65,25 +66,34 @@ bool GeomChecker::checkShape(const TopoDS_Shape& shape)
     int totalChecks = 0;
     int currentCheck = 0;
 
-    if (m_options & CheckAllFaces) {
-        if (m_options & CheckInvalidFaces) totalChecks++;
-        if (m_options & CheckSmallFaces) totalChecks++;
-    }
-    if (m_options & CheckAllEdges) {
-        if (m_options & CheckSmallEdges) totalChecks++;
+    // 统计需要执行的检查项
+    if (m_options & CheckDuplicateFaces) totalChecks++;
+    if (m_options & CheckInvalidFaces) totalChecks++;
+    if (m_options & CheckSmallFaces) totalChecks++;
+    if (m_options & CheckSmallEdges) totalChecks++;
+
+    if (totalChecks == 0) {
+        setError(QString::fromUtf8("未选择任何检查选项"));
+        return false;
     }
 
     // 执行面检查
+    if (m_options & CheckDuplicateFaces) {
+        if (checkDuplicateFaces(shape)) {
+            currentCheck++;
+            emit progressUpdated(100 * currentCheck / totalChecks);
+        }
+    }
     if (m_options & CheckInvalidFaces) {
         if (checkInvalidFaces(shape)) {
             currentCheck++;
-            emit progressUpdated(100 * currentCheck / std::max(1, totalChecks));
+            emit progressUpdated(100 * currentCheck / totalChecks);
         }
     }
     if (m_options & CheckSmallFaces) {
         if (checkSmallFaces(shape)) {
             currentCheck++;
-            emit progressUpdated(100 * currentCheck / std::max(1, totalChecks));
+            emit progressUpdated(100 * currentCheck / totalChecks);
         }
     }
 
@@ -91,7 +101,7 @@ bool GeomChecker::checkShape(const TopoDS_Shape& shape)
     if (m_options & CheckSmallEdges) {
         if (checkSmallEdges(shape)) {
             currentCheck++;
-            emit progressUpdated(100 * currentCheck / std::max(1, totalChecks));
+            emit progressUpdated(100 * currentCheck / totalChecks);
         }
     }
 
@@ -162,12 +172,11 @@ double GeomChecker::computeFaceAreaSimple(const TopoDS_Face& face) const
     return dims[1] * dims[2];
 }
 
-double GeomChecker::computeEdgeLengthSimple(const TopoDS_Edge&) const
+double GeomChecker::computeEdgeLengthSimple(const TopoDS_Edge& edge) const
 {
-    // 简化版本：返回一个估算值
-    // 由于Type转换限制，暂时返回固定值
-    // 实际建议使用BRepAdaptor_Curve获取准确边长
-    return 0.001;
+    // 使用BRepAdaptor_Curve获取准确的边长
+    BRepAdaptor_Curve curve(edge);
+    return curve.LastParameter() - curve.FirstParameter();
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +186,7 @@ double GeomChecker::computeEdgeLengthSimple(const TopoDS_Edge&) const
 bool GeomChecker::checkInvalidFaces(const TopoDS_Shape& shape)
 {
     TopExp_Explorer exp(shape, TopAbs_FACE);
-    int index = 0;
+    int index = 1;
     for (; exp.More(); exp.Next(), ++index) {
         const TopoDS_Face& face = TopoDS::Face(exp.Current());
         
@@ -208,7 +217,7 @@ bool GeomChecker::checkInvalidFaces(const TopoDS_Shape& shape)
 bool GeomChecker::checkSmallFaces(const TopoDS_Shape& shape)
 {
     TopExp_Explorer exp(shape, TopAbs_FACE);
-    int index = 0;
+    int index = 1;
     for (; exp.More(); exp.Next(), ++index) {
         const TopoDS_Face& face = TopoDS::Face(exp.Current());
         double area = computeFaceAreaSimple(face);
@@ -231,7 +240,7 @@ bool GeomChecker::checkSmallFaces(const TopoDS_Shape& shape)
 bool GeomChecker::checkSmallEdges(const TopoDS_Shape& shape)
 {
     TopExp_Explorer exp(shape, TopAbs_EDGE);
-    int index = 0;
+    int index = 1;
     for (; exp.More(); exp.Next(), ++index) {
         const TopoDS_Edge& edge = TopoDS::Edge(exp.Current());
         double length = computeEdgeLengthSimple(edge);
@@ -248,10 +257,92 @@ bool GeomChecker::checkSmallEdges(const TopoDS_Shape& shape)
 }
 
 // ---------------------------------------------------------------------------
-// 其他检查（占位）
+// 其他检查
 // ---------------------------------------------------------------------------
 
-bool GeomChecker::checkDuplicateFaces(const TopoDS_Shape&) { return true; }
+bool GeomChecker::checkDuplicateFaces(const TopoDS_Shape& shape)
+{
+    // 重复面检测算法
+    // 检测面积和位置都相同的面
+    
+    struct FaceInfo {
+        int index;
+        double area;
+        double centerX, centerY, centerZ;
+    };
+    
+    QList<FaceInfo> faces;
+    TopExp_Explorer exp(shape, TopAbs_FACE);
+    int index = 1;
+    
+    // 收集所有面的信息
+    double totalArea = 0.0;
+    for (; exp.More(); exp.Next(), ++index) {
+        const TopoDS_Face& face = TopoDS::Face(exp.Current());
+        FaceInfo info;
+        info.index = index;
+        info.area = computeFaceAreaSimple(face);
+        totalArea += info.area;
+        
+        // 获取边界框
+        Bnd_Box box;
+        BRepBndLib::Add(face, box);
+        double xMin, yMin, zMin, xMax, yMax, zMax;
+        box.Get(xMin, yMin, zMin, xMax, yMax, zMax);
+        
+        info.centerX = (xMin + xMax) / 2.0;
+        info.centerY = (yMin + yMax) / 2.0;
+        info.centerZ = (zMin + zMax) / 2.0;
+        
+        faces.append(info);
+    }
+    
+    // 根据模型尺度动态计算容差
+    double avgArea = totalArea / faces.size();
+    double scaleFactor = std::sqrt(avgArea);
+    
+    // 容差设置：根据模型大小动态调整
+    const double areaTolerance = 0.01 * avgArea;  // 面积容差为平均面积的1%
+    const double posTolerance = 0.001 * scaleFactor;  // 位置容差为特征尺寸的0.1%
+    
+    qDebug() << "重复面检测: 平均面积=" << avgArea << ", 面积容差=" << areaTolerance 
+             << ", 位置容差=" << posTolerance;
+    
+    int duplicateCount = 0;
+    
+    // 比较所有面，查找重复的
+    for (int i = 0; i < faces.size(); ++i) {
+        for (int j = i + 1; j < faces.size(); ++j) {
+            const FaceInfo& f1 = faces[i];
+            const FaceInfo& f2 = faces[j];
+            
+            // 检查面积差异（绝对差值）
+            double areaDiff = std::abs(f1.area - f2.area);
+            
+            // 检查中心点距离
+            double dist = std::sqrt(
+                std::pow(f1.centerX - f2.centerX, 2) +
+                std::pow(f1.centerY - f2.centerY, 2) +
+                std::pow(f1.centerZ - f2.centerZ, 2)
+            );
+            
+            // 更严格的条件：面积几乎相同且位置几乎重合
+            if (areaDiff < areaTolerance && dist < posTolerance) {
+                duplicateCount++;
+                CheckResultItem item;
+                item.type = CheckResultItem::DuplicateFace;
+                item.index = f1.index;
+                item.description = QString::fromUtf8("与面%2重复（面积差%3，位置距离%4）")
+                    .arg(f2.index).arg(areaDiff, 0, 'g', 6).arg(dist, 0, 'g', 6);
+                m_results.append(item);
+            }
+        }
+    }
+    
+    qDebug() << "重复面检测完成，共发现" << duplicateCount << "对重复面";
+    
+    return true;
+}
 bool GeomChecker::checkSliverFaces(const TopoDS_Shape&) { return true; }
 bool GeomChecker::checkIntersectingFaces(const TopoDS_Shape&) { return true; }
 bool GeomChecker::checkSelfIntersectingFace(const TopoDS_Shape&) { return true; }

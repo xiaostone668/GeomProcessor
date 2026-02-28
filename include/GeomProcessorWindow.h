@@ -9,10 +9,6 @@
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QPushButton>
-#include <QCheckBox>
-#include <QTreeWidget>
-#include <QTreeWidgetItem>
-#include <QGroupBox>
 
 // OCC
 #include <AIS_InteractiveContext.hxx>
@@ -25,6 +21,7 @@
 #include "GeomReceiver.h"
 #include "GeomProcessor.h"
 #include "GeomChecker.h"
+#include "GeometryCheckDialog.h"
 
 /**
  * @brief 应用 B 主窗口
@@ -57,12 +54,10 @@ private slots:
     void onLoadSTEP();
     void onSaveSTEP();
     void onSendResultBack();
-    void onRunGeometryCheck();
-    void onCheckOptionChanged();
+    void onCheckGeometry();
 
     // Face list selection
     void onFaceListSelectionChanged();
-    void onCheckResultItemDoubleClicked(QTreeWidgetItem* item, int column);
 
 private:
     void setupUI();
@@ -71,14 +66,20 @@ private:
     void setupOperationPanel();
     void setupCheckPanel();
     void setupFaceList();
+    void setupGeometryTree();  // 新增：几何浏览树
     void setupStatusBar();
     void initOCC();
 
+    // Check panel methods
+    void updateCheckResults();
+    void onRunGeometryCheck();
+    void onCheckOptionChanged();
+    void onCheckResultItemDoubleClicked(QTreeWidgetItem* item, int column);
+
     void refreshFaceList();
+    void refreshGeometryTree();  // 新增：刷新几何浏览树
     void displayCurrentShape();
     void updateStatusInfo();
-    
-    void updateCheckResults();
     
     // 自动保存并发送结果
     bool autoSaveAndSend();
@@ -102,15 +103,27 @@ private:
     // Checker
     GeomChecker*     m_checker      = nullptr;
 
+    // Check dialog
+    GeometryCheckDialog* m_checkDialog = nullptr;
+
     // Operation panel
     QDockWidget*     m_opDock       = nullptr;
     QDoubleSpinBox*  m_stitchTolSpin= nullptr;
+    QCheckBox*       m_convertToSolidCheck = nullptr;
     QDoubleSpinBox*  m_healPrecSpin = nullptr;
     QDoubleSpinBox*  m_offsetSpin   = nullptr;
 
     // Face list panel
     QDockWidget*     m_faceDock     = nullptr;
     QListWidget*     m_faceList     = nullptr;
+    
+    // Geometry browser tree panel (新增：几何浏览树)
+    QDockWidget*     m_geomTreeDock = nullptr;
+    QTreeWidget*     m_geomTree     = nullptr;
+
+    // Check panel
+    QDockWidget*     m_checkDock    = nullptr;
+    QTreeWidget*     m_checkResultTree = nullptr;
 
     // Status
     QLabel*          m_statusLabel  = nullptr;
@@ -120,10 +133,6 @@ private:
     // 3D 视图左下角几何信息悬浮标签
     QLabel*          m_geomInfoLabel = nullptr;
     void updateGeomInfoLabel(const QString& text);
-
-    // Check panel
-    QDockWidget*     m_checkDock = nullptr;
-    QTreeWidget*     m_checkResultTree = nullptr;
 };
 
 #endif // GEOM_PROCESSOR_WINDOW_H

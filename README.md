@@ -1,4 +1,4 @@
-# GeomProcessor - 几何数据处理器
+ # GeomProcessor - 几何数据处理器
 
 GeomProcessor是一个基于OpenCASCADE的几何数据处理工具，与SimulationTool配合使用，提供高级的几何编辑和修复功能。
 
@@ -232,9 +232,47 @@ GeomProcessor/
 
 xiaostone668
 
+## 回归测试要求
+
+⚠️ **重要**：本项目有核心回归测试用例，修改相关代码前必须执行测试！
+
+### 测试用例文档
+测试用例位于 `test/` 目录，主要包括：
+
+#### TC-001：1.stp缝合转换实体测试（P0优先级）
+- 文件：`test/测试用例-1.stp缝合转换实体.md`
+- 测试目的：验证多个Shell缝合、转换为Solid、状态显示等核心功能
+- 测试场景：3个Shell缝合并转换为1个Solid
+- 测试结果：✅ 全部通过（测试日期：2026-02-28）
+
+### 必须执行回归测试的代码修改
+
+修改以下代码时，必须先执行TC-001测试用例：
+
+1. `GeomProcessor::stitchShells()` - Shell缝合函数
+2. `GeomProcessor::convertShellToSolid()` - 转换为实体函数
+3. `GeomProcessorWindow::onStitchShells()` - 缝合操作UI处理
+4. `GeomProcessorWindow::updateStatusInfo()` - 状态信息更新
+5. `GeomProcessorWindow::refreshGeometryTree()` - 几何浏览树刷新
+
+### 测试执行步骤
+
+1. 编译程序：`cd build && cmake --build . --config Release`
+2. 运行程序：`.\run_geomprocessor.bat`
+3. 按照 `test/测试用例-1.stp缝合转换实体.md` 中的步骤执行测试
+4. 验证所有关键验证点是否通过
+5. 如果测试失败，不能发布新版本
+
+### 测试通过标准
+
+TC-001测试用例的关键验证点：
+- ✅ 状态栏显示"缝合完成并转换为实体 | 91 个面 | 0 个Shell | 1 个实体"
+- ✅ 浮动标签显示"面: 91   Shell: 0   实体: 1"
+- ✅ 几何浏览树从Shell结构切换为Solid结构
+
 ## 更新日志
 
-### v1.0.0 (2026-02-26)
+### v1.0.0 (2026-02-28)
 - ✅ 添加Shell统计功能
 - ✅ 优化缝合信息显示
 - ✅ 缝合默认参数改为0.01
@@ -243,3 +281,9 @@ xiaostone668
 - ✅ 支持Qt 5.6.3和OpenCASCADE 7.7.0
 - ✅ 启用UTF-8编码支持中文
 - ✅ 修复与SimulationTool的IPC通信
+- ✅ 面列表索引从0改为1
+- ✅ 几何浏览树显示完整Shell/Solid→Face→Edge拓扑结构
+- ✅ 实现"水密时转换为实体"功能
+- ✅ 容差默认值改为0.1
+- ✅ 转换为实体后状态栏正确显示"0 个Shell, 1 个实体"
+- ✅ 创建核心回归测试用例TC-001

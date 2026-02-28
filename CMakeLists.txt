@@ -77,6 +77,7 @@ set(SOURCES
     src/GeomProcessor.cpp
     src/GeomProcessorWindow.cpp
     src/GeomChecker.cpp
+    src/GeometryCheckDialog.cpp
 )
 
 set(HEADERS
@@ -86,6 +87,7 @@ set(HEADERS
     include/GeomProcessor.h
     include/GeomProcessorWindow.h
     include/GeomChecker.h
+    include/GeometryCheckDialog.h
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})

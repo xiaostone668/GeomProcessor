@@ -37,6 +37,9 @@ public:
     /** 缝合：将所有 Shell 缝合为 Solid（BRepBuilderAPI_Sewing） */
     bool stitchShells(double tolerance = 1.0e-3);
 
+    /** 将水密的Shell转换为Solid */
+    bool convertShellToSolid();
+
     /** 删除选中的面（索引从 0 起）并愈合缺口 */
     bool deleteFaces(const std::vector<int>& faceIndices);
 
