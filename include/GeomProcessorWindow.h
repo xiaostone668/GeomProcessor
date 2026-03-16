@@ -22,6 +22,9 @@
 #include "GeomProcessor.h"
 #include "GeomChecker.h"
 #include "GeometryCheckDialog.h"
+#include "CadCheckRepairWidget.h"
+#include "ParasolidChecker.h"
+#include "ParasolidCheckRepairWidget.h"
 
 /**
  * @brief 应用 B 主窗口
@@ -53,8 +56,8 @@ private slots:
     void onOffsetShape();
     void onLoadSTEP();
     void onSaveSTEP();
+    void onCloseDocument();
     void onSendResultBack();
-    void onCheckGeometry();
 
     // Face list selection
     void onFaceListSelectionChanged();
@@ -65,6 +68,8 @@ private:
     void setupToolBar();
     void setupOperationPanel();
     void setupCheckPanel();
+    void setupCadCheckPanel();  // CAD检查修复停靠面板
+    void setupParasolidCheckPanel();  // 新增：Parasolid检查修复停靠面板
     void setupFaceList();
     void setupGeometryTree();  // 新增：几何浏览树
     void setupStatusBar();
@@ -103,8 +108,15 @@ private:
     // Checker
     GeomChecker*     m_checker      = nullptr;
 
-    // Check dialog
+    // Parasolid Check
+    ParasolidChecker* m_parasolidChecker = nullptr;
+    ParasolidCheckRepairWidget* m_parasolidCheckWidget = nullptr;
+    QDockWidget* m_parasolidCheckDock = nullptr;
+
+    // Check dialogs
     GeometryCheckDialog* m_checkDialog = nullptr;
+    CadCheckRepairWidget* m_cadCheckWidget = nullptr;
+    QDockWidget* m_cadCheckDock = nullptr;
 
     // Operation panel
     QDockWidget*     m_opDock       = nullptr;

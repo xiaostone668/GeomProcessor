@@ -3,13 +3,17 @@
 #include <QDebug>
 #include <cmath>
 
-// OpenCASCADE - 只使用基础库，避免GProp等复杂库
+// OpenCASCADE - 使用完整库进行精确检查
 #include <TopoDS.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopAbs.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepTools.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
+#include <GeomAdaptor_Curve.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 
@@ -147,34 +151,62 @@ QList<CheckResultItem> GeomChecker::getProblemsByType(CheckResultItem::Type type
 }
 
 // ---------------------------------------------------------------------------
-// 辅助函数 - 简化版本
+// 辅助函数 - 使用OCC真实API进行精确计算
 // ---------------------------------------------------------------------------
 
 double GeomChecker::computeFaceAreaSimple(const TopoDS_Face& face) const
 {
-    // 使用简化的边界框计算近似面积
-    // 避免使用GProp_GProps等复杂库
+    // 尝试使用OCC的BRepGProp计算真实面积
+    // 如果该库不可用，则使用边界框近似
+    try {
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(face, props);
+        double area = props.Mass();
+        if (area > 0 && std::isfinite(area)) {
+            return area;  // 返回真实面积
+        }
+    } catch (...) {
+        // 失败时使用边界框近似
+    }
+    
+    // 边界框近似面积
     Bnd_Box box;
     BRepBndLib::Add(face, box);
-    
     double xMin, yMin, zMin, xMax, yMax, zMax;
     box.Get(xMin, yMin, zMin, xMax, yMax, zMax);
-    
-    // 近似面积：各面的最大尺寸
     double dx = xMax - xMin;
     double dy = yMax - yMin;
     double dz = zMax - zMin;
-    
-    // 返回最大的两个维度的乘积作为近似面积
     double dims[3] = {dx, dy, dz};
     std::sort(dims, dims + 3);
-    
     return dims[1] * dims[2];
 }
 
 double GeomChecker::computeEdgeLengthSimple(const TopoDS_Edge& edge) const
 {
-    // 使用BRepAdaptor_Curve获取准确的边长
+    // 尝试使用OCC的GCPnts_AbscissaPoint计算真实边长
+    try {
+        BRepAdaptor_Curve curve(edge);
+        Standard_Real first = curve.FirstParameter();
+        Standard_Real last = curve.LastParameter();
+        
+        if (curve.GetType() == GeomAbs_Line) {
+            // 直线：直接计算距离
+            gp_Pnt p1 = curve.Value(first);
+            gp_Pnt p2 = curve.Value(last);
+            return p1.Distance(p2);
+        } else {
+            // 曲线：使用BRepAdaptor_Curve和GCPnts_AbscissaPoint::Length静态方法
+            Standard_Real length = GCPnts_AbscissaPoint::Length(curve, first, last);
+            if (length > 0 && std::isfinite(length)) {
+                return length;
+            }
+        }
+    } catch (...) {
+        // 失败时使用参数差近似
+    }
+    
+    // 回退到参数差近似
     BRepAdaptor_Curve curve(edge);
     return curve.LastParameter() - curve.FirstParameter();
 }

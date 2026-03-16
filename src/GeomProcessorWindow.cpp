@@ -1,5 +1,8 @@
 #include "GeomProcessorWindow.h"
 
+#include "ParasolidChecker.h"
+#include "ParasolidCheckRepairWidget.h"
+
 #include <QMenuBar>
 #include <QToolBar>
 #include <QFileDialog>
@@ -49,7 +52,18 @@ GeomProcessorWindow::GeomProcessorWindow(QWidget* parent)
 
     m_processor = new GeomProcessor(this);
     m_checker   = new GeomChecker(this);
+    m_parasolidChecker = new ParasolidChecker(this);
     m_receiver  = new GeomReceiver(this);
+    
+    // 设置CAD检查Widget的checker（必须在m_checker创建之后）
+    if (m_cadCheckWidget) {
+        m_cadCheckWidget->setChecker(m_checker);
+    }
+    
+    // 设置Parasolid检查Widget的checker（必须在m_parasolidChecker创建之后）
+    if (m_parasolidCheckWidget) {
+        m_parasolidCheckWidget->setChecker(m_parasolidChecker);
+    }
 
     // Processor signals
     connect(m_processor, &GeomProcessor::shapeChanged,
@@ -60,6 +74,11 @@ GeomProcessorWindow::GeomProcessorWindow(QWidget* parent)
             this, &GeomProcessorWindow::refreshGeometryTree);
     connect(m_processor, &GeomProcessor::shapeChanged,
             this, &GeomProcessorWindow::updateStatusInfo);
+    connect(m_processor, &GeomProcessor::shapeChanged, this, [this](){
+        if (m_cadCheckWidget && m_processor) {
+            m_cadCheckWidget->setShape(m_processor->getShape());
+        }
+    });
     connect(m_processor, &GeomProcessor::progressUpdated,
             m_progressBar, &QProgressBar::setValue);
     connect(m_processor, &GeomProcessor::errorOccurred, this, [this](const QString& e){
@@ -73,6 +92,14 @@ GeomProcessorWindow::GeomProcessorWindow(QWidget* parent)
     connect(m_checker, &GeomChecker::errorOccurred, this, [this](const QString& e){
         m_statusLabel->setText("检查错误: " + e);
         QMessageBox::warning(this, "几何检查错误", e);
+    });
+    
+    // Parasolid Checker signals
+    connect(m_parasolidChecker, &ParasolidChecker::progressUpdated,
+            m_progressBar, &QProgressBar::setValue);
+    connect(m_parasolidChecker, &ParasolidChecker::errorOccurred, this, [this](const QString& e){
+        m_statusLabel->setText("Parasolid检查错误: " + e);
+        QMessageBox::warning(this, "Parasolid检查错误", e);
     });
 
     // Receiver signals
@@ -138,6 +165,8 @@ void GeomProcessorWindow::setupUI()
 
     setupOperationPanel();
     setupCheckPanel();
+    setupCadCheckPanel();  // CAD检查修复停靠面板
+    setupParasolidCheckPanel();  // 新增：Parasolid检查修复停靠面板
     setupFaceList();
     setupGeometryTree();
     setupStatusBar();
@@ -164,6 +193,11 @@ void GeomProcessorWindow::setupMenuBar()
     saveAct->setShortcut(QKeySequence::Save);
     connect(saveAct, &QAction::triggered, this, &GeomProcessorWindow::onSaveSTEP);
     fileMenu->addAction(saveAct);
+
+    auto* closeAct = new QAction(tr("关闭文档"), this);
+    closeAct->setShortcut(QKeySequence::Close);
+    connect(closeAct, &QAction::triggered, this, &GeomProcessorWindow::onCloseDocument);
+    fileMenu->addAction(closeAct);
 
     fileMenu->addSeparator();
     auto* exitAct = new QAction(tr("退出"), this);
@@ -198,6 +232,9 @@ void GeomProcessorWindow::setupToolBar()
     auto* saveAct   = tb->addAction(tr("💾 保存"));
     connect(saveAct, &QAction::triggered, this, &GeomProcessorWindow::onSaveSTEP);
 
+    auto* closeAct  = tb->addAction(tr("❌ 关闭文档"));
+    connect(closeAct, &QAction::triggered, this, &GeomProcessorWindow::onCloseDocument);
+
     tb->addSeparator();
 
     auto* stitchAct = tb->addAction(tr("🔗 缝合"));
@@ -214,8 +251,38 @@ void GeomProcessorWindow::setupToolBar()
 
     tb->addSeparator();
 
-    auto* checkAct  = tb->addAction(tr("🔍 检查"));
+    auto* checkAct  = tb->addAction(tr("🔍 检查OCC版"));
     connect(checkAct, &QAction::triggered, this, &GeomProcessorWindow::onRunGeometryCheck);
+
+    auto* cadCheckAct = tb->addAction(tr("🔧 CAD检查修复"));
+    connect(cadCheckAct, &QAction::triggered, this, [this](){
+        // 切换到OCC检查器并显示停靠面板
+        if (m_cadCheckWidget) {
+            m_cadCheckWidget->setChecker(m_checker);
+            m_cadCheckDock->setVisible(true);
+            m_cadCheckDock->raise();
+        }
+    });
+
+    auto* paraCheckAct = tb->addAction(tr("🔍 Parasolid检查"));
+    connect(paraCheckAct, &QAction::triggered, this, [this](){
+        // 显示Parasolid检查停靠面板
+        if (!m_parasolidCheckDock) {
+            QMessageBox::warning(this, "错误", QString::fromUtf8("Parasolid检查面板未初始化"));
+            return;
+        }
+        
+        if (!m_parasolidCheckWidget) {
+            QMessageBox::warning(this, "错误", QString::fromUtf8("Parasolid检查Widget未初始化"));
+            return;
+        }
+        
+        m_parasolidCheckDock->setVisible(true);
+        m_parasolidCheckDock->raise();
+        
+        // 验证面板是否显示
+        m_statusLabel->setText(QString::fromUtf8("Parasolid检查面板已显示"));
+    });
 
     tb->addSeparator();
 
@@ -285,7 +352,7 @@ void GeomProcessorWindow::setupOperationPanel()
 
 void GeomProcessorWindow::setupCheckPanel()
 {
-    m_checkDock = new QDockWidget(tr("几何检查"), this);
+    m_checkDock = new QDockWidget(tr("几何检查OCC版"), this);
 
     auto* w   = new QWidget(m_checkDock);
     auto* lay = new QVBoxLayout(w);
@@ -305,6 +372,11 @@ void GeomProcessorWindow::setupCheckPanel()
     cbDupFace->setProperty("checkOption", (int)GeomChecker::CheckDuplicateFaces);
     cbInvFace->setProperty("checkOption", (int)GeomChecker::CheckInvalidFaces);
     cbSmallFace->setProperty("checkOption", (int)GeomChecker::CheckSmallFaces);
+    
+    // 连接复选框状态改变信号
+    connect(cbDupFace, &QCheckBox::stateChanged, this, &GeomProcessorWindow::onCheckOptionChanged);
+    connect(cbInvFace, &QCheckBox::stateChanged, this, &GeomProcessorWindow::onCheckOptionChanged);
+    connect(cbSmallFace, &QCheckBox::stateChanged, this, &GeomProcessorWindow::onCheckOptionChanged);
 
     faceLay->addWidget(cbDupFace);
     faceLay->addWidget(cbInvFace);
@@ -322,7 +394,7 @@ void GeomProcessorWindow::setupCheckPanel()
     lay->addWidget(paramBox);
 
     // 执行检查按钮
-    auto* checkBtn = new QPushButton(tr("🔍 执行检查"));
+    auto* checkBtn = new QPushButton(tr("🔍 执行检查OCC版"));
     checkBtn->setStyleSheet("background-color:#4CAF50;color:white;font-weight:bold;padding:8px;");
     connect(checkBtn, &QPushButton::clicked, this, &GeomProcessorWindow::onRunGeometryCheck);
     lay->addWidget(checkBtn);
@@ -394,9 +466,16 @@ void GeomProcessorWindow::onRunGeometryCheck()
         
         int numProblems = m_checker->getProblemCount();
         if (numProblems == 0) {
-            m_statusLabel->setText("检查完成：未发现问题");
+            m_statusLabel->setText("检查完成，未发现错误");
+            // 在结果树中添加一条提示信息
+            auto* item = new QTreeWidgetItem(m_checkResultTree);
+            item->setText(0, QString::fromUtf8("✓ 通过"));
+            item->setText(1, "");
+            item->setText(2, QString::fromUtf8("检查完成，未发现错误"));
+            item->setForeground(0, QBrush(Qt::darkGreen));
+            item->setForeground(2, QBrush(Qt::darkGreen));
         } else {
-            m_statusLabel->setText(QString("检查完成：发现 %1 个问题").arg(numProblems));
+            m_statusLabel->setText(QString("检查完成，发现 %1 个问题").arg(numProblems));
         }
     }
 }
@@ -632,6 +711,46 @@ void GeomProcessorWindow::onSaveSTEP()
     } else {
         QMessageBox::warning(this, "保存失败", m_processor->getLastError());
     }
+}
+
+void GeomProcessorWindow::onCloseDocument()
+{
+    if (!m_processor->hasShape()) {
+        m_statusLabel->setText("没有打开的文档");
+        return;
+    }
+
+    // 清除当前几何体
+    if (m_processor) {
+        m_processor->clearShape();
+    }
+
+    // 清除OCC显示
+    if (m_context) {
+        m_context->RemoveAll(true);
+    }
+
+    // 清除界面信息
+    m_faceList->clear();
+    m_geomTree->clear();
+    
+    // 清除检查结果
+    m_checkResultTree->clear();
+    if (m_cadCheckWidget) {
+        m_cadCheckWidget->setShape(TopoDS_Shape());
+    }
+
+    // 清除浮动信息标签
+    if (m_geomInfoLabel) {
+        m_geomInfoLabel->hide();
+    }
+
+    m_statusLabel->setText("文档已关闭");
+    m_progressBar->setValue(0);
+    
+    // 重置序列号和文件路径
+    m_currentSeq = 0;
+    m_lastGeomFile.clear();
 }
 
 void GeomProcessorWindow::onSendResultBack()
@@ -979,20 +1098,63 @@ bool GeomProcessorWindow::autoSaveAndSend()
     return m_receiver->sendResult(tmpFile);
 }
 
-void GeomProcessorWindow::onCheckGeometry()
+// ---------------------------------------------------------------------------
+// CAD检查修复停靠面板设置
+// ---------------------------------------------------------------------------
+
+void GeomProcessorWindow::setupCadCheckPanel()
 {
-    if (!m_processor->hasShape()) {
-        QMessageBox::information(this, "提示", "请先加载 STEP 文件或等待 SimulationTool 发送几何");
-        return;
-    }
+    m_cadCheckWidget = new CadCheckRepairWidget(this);
+    // setChecker将在构造函数中调用，因为m_checker在此时还未创建
+    
+    // 连接信号
+    connect(m_cadCheckWidget, &CadCheckRepairWidget::checkingFinished,
+            this, [this](int problemCount) {
+        m_statusLabel->setText(QString::fromUtf8("CAD检查完成，发现 %1 个问题").arg(problemCount));
+    });
+    connect(m_cadCheckWidget, &CadCheckRepairWidget::repairRequested,
+            this, [this](const QList<int>& problemIndices) {
+        // TODO: 实现修复功能
+        m_statusLabel->setText(QString::fromUtf8("修复功能待实现。选中了 %1 个问题").arg(problemIndices.size()));
+    });
+    connect(m_cadCheckWidget, &CadCheckRepairWidget::highlightObject,
+            this, [this](int index) {
+        m_statusLabel->setText(QString::fromUtf8("高亮显示元素索引: %1").arg(index));
+    });
+    
+    m_cadCheckDock = new QDockWidget(QString::fromUtf8("CAD检查修复"), this);
+    m_cadCheckDock->setWidget(m_cadCheckWidget);
+    addDockWidget(Qt::RightDockWidgetArea, m_cadCheckDock);
+}
 
-    if (!m_checkDialog) {
-        m_checkDialog = new GeometryCheckDialog(this);
-        m_checkDialog->setChecker(m_checker);
-    }
+// ---------------------------------------------------------------------------
+// Parasolid检查修复停靠面板设置
+// ---------------------------------------------------------------------------
 
-    m_checkDialog->setShape(m_processor->getShape());
-    m_checkDialog->show();
-    m_checkDialog->raise();
-    m_checkDialog->activateWindow();
+void GeomProcessorWindow::setupParasolidCheckPanel()
+{
+    m_parasolidCheckWidget = new ParasolidCheckRepairWidget(this);
+    // setChecker将在构造函数中调用
+    
+    // 连接信号
+    connect(m_parasolidCheckWidget, &ParasolidCheckRepairWidget::checkingFinished,
+            this, [this](int problemCount) {
+        m_statusLabel->setText(QString::fromUtf8("Parasolid检查完成，发现 %1 个问题").arg(problemCount));
+    });
+    connect(m_parasolidCheckWidget, &ParasolidCheckRepairWidget::repairRequested,
+            this, [this](const QList<int>& problemIndices) {
+        // TODO: 实现Parasolid修复功能
+        m_statusLabel->setText(QString::fromUtf8("Parasolid修复功能待实现。选中了 %1 个问题").arg(problemIndices.size()));
+    });
+    connect(m_parasolidCheckWidget, &ParasolidCheckRepairWidget::highlightObject,
+            this, [this](int index) {
+        m_statusLabel->setText(QString::fromUtf8("高亮显示Parasolid元素索引: %1").arg(index));
+    });
+    
+    m_parasolidCheckDock = new QDockWidget(QString::fromUtf8("Parasolid检查修复"), this);
+    m_parasolidCheckDock->setWidget(m_parasolidCheckWidget);
+    addDockWidget(Qt::RightDockWidgetArea, m_parasolidCheckDock);
+    
+    // 默认隐藏Parasolid面板，让用户通过工具栏按钮来显示
+    m_parasolidCheckDock->setVisible(false);
 }

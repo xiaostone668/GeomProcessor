@@ -47,8 +47,8 @@ set(_OCC_LIB_NAMES
     TKXSBase TKV3d TKService TKOpenGl
     # STEP (OCCT 7.7.0 uses legacy STEP libs)
     TKSTEP TKSTEPAttr TKSTEPBase TKSTEP209
-    # ShapeFix
-    TKShHealing
+    # ShapeFix and geometric properties
+    TKShHealing TKGProps
     # Boolean / Defeaturing
     TKBO TKBool
     # Offset
@@ -78,6 +78,9 @@ set(SOURCES
     src/GeomProcessorWindow.cpp
     src/GeomChecker.cpp
     src/GeometryCheckDialog.cpp
+    src/CadCheckRepairWidget.cpp
+    src/ParasolidChecker.cpp
+    src/ParasolidCheckRepairWidget.cpp
 )
 
 set(HEADERS
@@ -88,6 +91,9 @@ set(HEADERS
     include/GeomProcessorWindow.h
     include/GeomChecker.h
     include/GeometryCheckDialog.h
+    include/CadCheckRepairWidget.h
+    include/ParasolidChecker.h
+    include/ParasolidCheckRepairWidget.h
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
@@ -120,6 +126,14 @@ if(WIN32)
                     "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
             COMMENT "Copying OCCT DLLs")
     endif()
+    
+    # OpenVR DLL
+    if(EXISTS "${OCC_ROOT}/bin/openvr_api.dll")
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OCC_ROOT}/bin/openvr_api.dll"
+                    "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+            COMMENT "Copying OpenVR DLL")
+    endif()
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${OCC_LIB_DIR}"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
@@ -134,6 +148,8 @@ if(WIN32)
         "${_OCC_BASE}/ffmpeg-3.3.4-64/bin/swscale-4.dll"
         "${_OCC_BASE}/ffmpeg-3.3.4-64/bin/avutil-55.dll"
         "${_OCC_BASE}/tbb_2021.5-vc14-64/bin/tbb12.dll"
+        "${_OCC_BASE}/tbb_2021.5-vc14-64/bin/tbbmalloc.dll"
+        "${_OCC_BASE}/tbb_2021.5-vc14-64/bin/tbbmalloc_proxy.dll"
         "${_OCC_BASE}/freetype-2.5.5-vc14-64/bin/freetype.dll"
     )
     foreach(_dll ${_EXTRA_DLLS})
